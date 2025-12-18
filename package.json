@@ -1,0 +1,16 @@
+{
+  "name": "simplefileserver",
+  "version": "1.0.0",
+  "description": "A simple HTTP file server for quickly sharing files over local WiFi",
+  "main": "index.js",
+  "bin": {
+    "simplefileserver": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["file-server", "http", "static", "local", "wifi"],
+  "author": "",
+  "license": "ISC"
+}
