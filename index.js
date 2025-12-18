@@ -30,6 +30,18 @@ const MIME_TYPES = {
   '.xml': 'application/xml',
 };
 
+// HTML escape to prevent XSS
+function escapeHtml(text) {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+
 // Get local IP addresses
 function getLocalIPs() {
   const interfaces = os.networkInterfaces();
@@ -84,13 +96,14 @@ function generateDirectoryListing(dirPath, urlPath) {
   });
   
   // Generate HTML
+  const escapedUrlPath = escapeHtml(urlPath);
   const html = `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Index of ${urlPath}</title>
+  <title>Index of ${escapedUrlPath}</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -158,18 +171,20 @@ function generateDirectoryListing(dirPath, urlPath) {
   </style>
 </head>
 <body>
-  <h1>Index of ${urlPath}</h1>
+  <h1>Index of ${escapedUrlPath}</h1>
   <div class="file-list">
     ${items.map(item => {
       const icon = item.isDirectory ? '📁' : '📄';
       const className = item.isDirectory ? 'directory' : '';
       const size = item.isDirectory ? '' : formatSize(item.size);
       const modified = item.name === '..' ? '' : formatDate(item.modified);
+      const escapedName = escapeHtml(item.name);
+      const escapedPath = escapeHtml(item.path);
       
       return `
-        <a href="${item.path}" class="file-item">
+        <a href="${escapedPath}" class="file-item">
           <span class="icon">${icon}</span>
-          <span class="name ${className}">${item.name}</span>
+          <span class="name ${className}">${escapedName}</span>
           <span class="size">${size}</span>
           <span class="modified">${modified}</span>
         </a>
@@ -201,18 +216,20 @@ function formatDate(date) {
 const server = http.createServer((req, res) => {
   // Decode URL to handle special characters
   const decodedUrl = decodeURIComponent(req.url);
-  const filePath = path.join(SERVE_DIR, decodedUrl);
   
   // Security check: prevent directory traversal
-  const normalizedPath = path.normalize(filePath);
-  if (!normalizedPath.startsWith(SERVE_DIR)) {
+  // Use path.resolve to get absolute paths and compare them
+  const requestedPath = path.resolve(SERVE_DIR, '.' + decodedUrl);
+  const baseDir = path.resolve(SERVE_DIR);
+  
+  if (!requestedPath.startsWith(baseDir + path.sep) && requestedPath !== baseDir) {
     res.writeHead(403, { 'Content-Type': 'text/plain' });
     res.end('403 Forbidden');
     return;
   }
   
   // Check if file/directory exists
-  fs.stat(filePath, (err, stats) => {
+  fs.stat(requestedPath, (err, stats) => {
     if (err) {
       if (err.code === 'ENOENT') {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -227,7 +244,7 @@ const server = http.createServer((req, res) => {
     // If it's a directory, show directory listing
     if (stats.isDirectory()) {
       try {
-        const html = generateDirectoryListing(filePath, decodedUrl);
+        const html = generateDirectoryListing(requestedPath, decodedUrl);
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(html);
       } catch (error) {
@@ -238,7 +255,7 @@ const server = http.createServer((req, res) => {
     }
     
     // If it's a file, serve it
-    const ext = path.extname(filePath).toLowerCase();
+    const ext = path.extname(requestedPath).toLowerCase();
     const mimeType = MIME_TYPES[ext] || 'application/octet-stream';
     
     res.writeHead(200, {
@@ -246,11 +263,14 @@ const server = http.createServer((req, res) => {
       'Content-Length': stats.size
     });
     
-    const fileStream = fs.createReadStream(filePath);
+    const fileStream = fs.createReadStream(requestedPath);
     fileStream.pipe(res);
     
     fileStream.on('error', (error) => {
-      res.writeHead(500, { 'Content-Type': 'text/plain' });
+      // Only attempt to write headers if they haven't been sent yet
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+      }
       res.end('500 Internal Server Error');
     });
   });
